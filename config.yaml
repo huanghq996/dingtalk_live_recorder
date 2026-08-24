@@ -1,0 +1,13 @@
+# 相对路径以本文件所在目录为基准；留空时使用 recordings。
+output_dir: recordings
+
+# 从上到下为直播选择优先级。
+target_groups:
+  - 小品种
+  - Lcai学员群14
+  - 公司群
+
+log:
+  # 留空时使用 logs。
+  directory: logs
+  retention_days: 30

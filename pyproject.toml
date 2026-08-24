@@ -1,0 +1,29 @@
+[project]
+name = "dingtalk-live-recorder"
+version = "0.1.0"
+description = "按优先级监控并录制钉钉群直播"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "maafw==5.12.3",
+    "pyaudiowpatch==0.2.12.8",
+    "pyyaml>=6.0.2,<7",
+]
+
+[project.scripts]
+dingtalk-live-recorder = "dingtalk_live_recorder.app:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<9",
+]
+
+[build-system]
+requires = ["setuptools>=80,<81"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

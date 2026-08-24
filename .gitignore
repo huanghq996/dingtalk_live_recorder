@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Runtime output
+recordings/
+logs/
+assets/debug/
+
+# Local overrides
+.env
+config.local.yaml

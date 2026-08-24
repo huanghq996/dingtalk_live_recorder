@@ -1,0 +1,29 @@
+{
+  "interface_version": 2,
+  "name": "DingTalkDemo",
+  "label": "钉钉自动化入门",
+  "title": "钉钉自动化入门",
+  "version": "0.1.0",
+  "controller": [
+    {
+      "name": "钉钉桌面端",
+      "label": "钉钉桌面端",
+      "type": "Win32",
+      "display_short_side": 720,
+      "win32": {
+        "class_regex": ".*",
+        "window_regex": ".*",
+        "screencap": "FramePool",
+        "mouse": "PostMessage",
+        "keyboard": "PostMessage"
+      }
+    }
+  ],
+  "resource": [
+    {
+      "name": "钉钉资源",
+      "label": "钉钉资源",
+      "path": ["resource"]
+    }
+  ]
+}
