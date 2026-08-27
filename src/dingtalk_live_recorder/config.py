@@ -9,6 +9,9 @@ import yaml
 DEFAULT_OUTPUT_DIRECTORY = "recordings"
 DEFAULT_LOG_DIRECTORY = "logs"
 DEFAULT_LOG_RETENTION_DAYS = 30
+DEFAULT_VIDEO_ENCODER = "auto"
+SUPPORTED_VIDEO_ENCODERS = frozenset({"auto", "libx264", "h264_nvenc"})
+DEFAULT_SCAN_INTERVAL_SECONDS = 15
 
 
 class ConfigError(RuntimeError):
@@ -21,6 +24,8 @@ class AppConfig:
     target_groups: tuple[str, ...]
     log_dir: Path
     log_retention_days: int
+    video_encoder: str = DEFAULT_VIDEO_ENCODER
+    scan_interval_seconds: int = DEFAULT_SCAN_INTERVAL_SECONDS
 
 
 def _resolve_directory(base_dir: Path, value: Any, default: str, field: str) -> Path:
@@ -58,6 +63,20 @@ def load_config(path: Path) -> AppConfig:
     retention_days = log_config.get("retention_days", DEFAULT_LOG_RETENTION_DAYS)
     if isinstance(retention_days, bool) or not isinstance(retention_days, int) or retention_days < 1:
         raise ConfigError("log.retention_days 必须是正整数")
+    scan_interval_seconds = raw.get("scan_interval_seconds", DEFAULT_SCAN_INTERVAL_SECONDS)
+    if (
+        isinstance(scan_interval_seconds, bool)
+        or not isinstance(scan_interval_seconds, int)
+        or scan_interval_seconds < 1
+    ):
+        raise ConfigError("scan_interval_seconds 必须是正整数")
+    recording_config = raw.get("recording") or {}
+    if not isinstance(recording_config, dict):
+        raise ConfigError("recording 必须是映射")
+    video_encoder = recording_config.get("video_encoder", DEFAULT_VIDEO_ENCODER)
+    if video_encoder not in SUPPORTED_VIDEO_ENCODERS:
+        supported = ", ".join(sorted(SUPPORTED_VIDEO_ENCODERS))
+        raise ConfigError(f"recording.video_encoder 必须是以下值之一: {supported}")
 
     base_dir = config_path.parent
     return AppConfig(
@@ -75,4 +94,6 @@ def load_config(path: Path) -> AppConfig:
             "log.directory",
         ),
         log_retention_days=retention_days,
+        video_encoder=video_encoder,
+        scan_interval_seconds=scan_interval_seconds,
     )
