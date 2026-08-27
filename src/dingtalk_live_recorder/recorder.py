@@ -24,8 +24,12 @@ LOGGER = logging.getLogger(__name__)
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 FRAME_RATE = 30
-VIDEO_CODEC = "libx264"
+SOFTWARE_VIDEO_CODEC = "libx264"
+NVIDIA_VIDEO_CODEC = "h264_nvenc"
+AUTO_VIDEO_ENCODER = "auto"
 VIDEO_CRF = 24
+NVIDIA_VIDEO_CQ = 24
+VIDEO_ENCODER_PROBE_TIMEOUT_SECONDS = 10
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "128k"
 AUDIO_FILTER = "loudnorm=I=-16:TP=-1.5:LRA=11,aresample=async=1:first_pts=0"
@@ -81,6 +85,80 @@ def require_program(name: str) -> str:
     if path is None:
         raise FileNotFoundError(f"未找到 {name}，请先安装 FFmpeg 并加入 PATH")
     return path
+
+def probe_nvidia_video_encoder(ffmpeg: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=16x16:r=1:d=0.1",
+                "-frames:v",
+                "1",
+                "-c:v",
+                NVIDIA_VIDEO_CODEC,
+                "-f",
+                "null",
+                "-",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=VIDEO_ENCODER_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except OSError as error:
+        return str(error)
+    except subprocess.TimeoutExpired:
+        return f"编码器检测超过 {VIDEO_ENCODER_PROBE_TIMEOUT_SECONDS} 秒"
+
+    if result.returncode == 0:
+        return None
+    return result.stderr.strip().replace("\n", " | ") or f"退出码: {result.returncode}"
+
+
+def select_video_codec(ffmpeg: str, video_encoder: str) -> str:
+    if video_encoder == SOFTWARE_VIDEO_CODEC:
+        return SOFTWARE_VIDEO_CODEC
+    if video_encoder not in {AUTO_VIDEO_ENCODER, NVIDIA_VIDEO_CODEC}:
+        raise ValueError(f"不支持的视频编码器: {video_encoder}")
+
+    unavailable_reason = probe_nvidia_video_encoder(ffmpeg)
+    if unavailable_reason is None:
+        LOGGER.info("使用 NVIDIA GPU 视频编码器: %s", NVIDIA_VIDEO_CODEC)
+        return NVIDIA_VIDEO_CODEC
+    if video_encoder == AUTO_VIDEO_ENCODER:
+        LOGGER.warning(
+            "NVIDIA GPU 视频编码器不可用，回退到 %s: %s",
+            SOFTWARE_VIDEO_CODEC,
+            unavailable_reason,
+        )
+        return SOFTWARE_VIDEO_CODEC
+    raise RuntimeError(f"NVIDIA GPU 视频编码器不可用: {unavailable_reason}")
+
+
+def video_codec_args(video_codec: str) -> list[str]:
+    if video_codec == SOFTWARE_VIDEO_CODEC:
+        return ["-preset", "fast", "-crf", str(VIDEO_CRF)]
+    if video_codec == NVIDIA_VIDEO_CODEC:
+        return [
+            "-preset",
+            "p5",
+            "-tune",
+            "hq",
+            "-rc",
+            "vbr",
+            "-cq",
+            str(NVIDIA_VIDEO_CQ),
+            "-b:v",
+            "0",
+        ]
+    raise ValueError(f"不支持的视频编码器: {video_codec}")
 
 
 def prepare_window(hwnd: int) -> WindowState:
@@ -265,6 +343,7 @@ def start_video_recording(
     ffmpeg: str,
     output_path: Path,
     frame_size: tuple[int, int],
+    video_codec: str,
 ) -> subprocess.Popen:
     frame_width, frame_height = frame_size
     command = [
@@ -289,11 +368,8 @@ def start_video_recording(
             f"pad={WINDOW_WIDTH}:{WINDOW_HEIGHT}:(ow-iw)/2:(oh-ih)/2"
         ),
         "-c:v",
-        VIDEO_CODEC,
-        "-preset",
-        "fast",
-        "-crf",
-        str(VIDEO_CRF),
+        video_codec,
+        *video_codec_args(video_codec),
         "-profile:v",
         "high",
         "-level:v",
@@ -308,10 +384,11 @@ def start_video_recording(
         str(output_path),
     ]
     LOGGER.info(
-        "开始视频录制: output=%s, capture=%sx%s, video=H.264 %sx%s %sfps",
+        "开始视频录制: output=%s, capture=%sx%s, video=H.264/%s %sx%s %sfps",
         output_path,
         frame_width,
         frame_height,
+        video_codec,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         FRAME_RATE,
@@ -522,10 +599,15 @@ def _safe_filename(value: str) -> str:
 
 
 class LiveRecorder:
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        video_encoder: str = AUTO_VIDEO_ENCODER,
+    ) -> None:
         self._output_dir = output_dir
         self._ffmpeg = require_program("ffmpeg")
         self._ffprobe = require_program("ffprobe")
+        self._video_codec = select_video_codec(self._ffmpeg, video_encoder)
 
     def record(self, hwnd: int, group_name: str) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -546,6 +628,7 @@ class LiveRecorder:
                 self._ffmpeg,
                 video_path,
                 (frame_width, frame_height),
+                self._video_codec,
             )
             audio_recorder = WasapiAudioRecorder(
                 self._ffmpeg,
