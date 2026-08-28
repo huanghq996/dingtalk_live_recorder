@@ -5,7 +5,7 @@ Windows 下的钉钉群直播监控与自动录制项目。程序启动后会自
 ## 功能
 
 - 自动查找并启动钉钉。
-- 每轮扫描结束后等待 10 秒，再执行下一轮扫描。
+- 每轮扫描完成后按 `scan_interval_seconds` 等待；默认 15 秒。
 - 支持配置多个目标群聊，列表顺序即直播选择优先级。
 - 同一时间只录制一个直播。
 - 录制期间暂停定时扫描，不会并发打开或录制其他直播。
@@ -57,6 +57,14 @@ target_groups:
   - 小品种
   - Lcai学员群14
 
+
+# 每轮扫描完成后的等待时间，单位为秒；默认 15。
+scan_interval_seconds: 15
+
+# 视频编码器：auto 优先使用 NVIDIA GPU（NVENC），不可用时回退到 CPU。
+# 也可设为 libx264 或 h264_nvenc。
+recording:
+  video_encoder: auto
 log:
   # 日志目录。相对路径以 config.yaml 所在目录为基准。
   # 未配置或留空时使用 logs。
@@ -83,6 +91,20 @@ output_dir: D:\recordings\dingtalk
 ```
 
 目录不存在时会自动创建。目录创建失败时，程序异常退出。
+
+### 扫描间隔
+
+`scan_interval_seconds` 是每轮扫描**完成后**的等待秒数，必须是正整数，默认 `15`。例如设为 `30` 后，程序会在每轮扫描结束或录制结束后等待 30 秒再继续扫描。
+
+### 视频编码器
+
+`recording.video_encoder` 可取：
+
+- `auto`（默认）：启动时以一帧实际编码测试 NVIDIA NVENC；成功则使用 GPU，失败时记录原因并回退到 CPU `libx264`。
+- `libx264`：强制使用 CPU 软件编码。
+- `h264_nvenc`：强制使用 NVIDIA NVENC；驱动、显卡或 FFmpeg 不可用时，启动失败而不会静默降级。
+
+GPU 仅负责 H.264 编码。当前截图、Python 帧传输、OCR 前后处理和 WASAPI 音频采集仍在 CPU；详细录制路径请以日志中的 `H.264/h264_nvenc` 或 `H.264/libx264` 为准。
 
 ### 目标群聊和优先级
 
@@ -126,6 +148,22 @@ uv run python -m dingtalk_live_recorder
 
 按 `Ctrl+C` 停止程序。如果正在录制，程序会先停止音视频编码并尝试完成当前录制文件。
 
+## 后台运行
+
+后台启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-recorder.ps1
+```
+
+停止后台进程：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\stop-recorder.ps1
+```
+
+启动脚本将进程 ID 写入 `logs\dingtalk-live-recorder.pid.json`，并拒绝重复启动。停止脚本会终止该进程及其子进程；若正在录制，当前未完成的录制无法保证合并为最终 MKV 文件。
+
 ## 运行流程
 
 1. 读取并校验 `config.yaml`。
@@ -133,7 +171,7 @@ uv run python -m dingtalk_live_recorder
 3. 查找已经运行的钉钉主窗口；未找到时自动启动钉钉。
 4. 初始化 MaaFramework OCR 和窗口控制器。
 5. 按照 `target_groups` 顺序检查群聊。
-6. 没有直播时等待 10 秒，然后开始下一轮扫描。
+6. 没有直播时按 `scan_interval_seconds` 等待，然后开始下一轮扫描。
 7. 发现直播时打开直播窗口并暂停后续扫描。
 8. 同步录制视频和系统播放音频。
 9. 检测到“直播已结束”或直播窗口关闭后停止录制。

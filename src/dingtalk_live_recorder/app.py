@@ -23,7 +23,6 @@ from .recorder import LiveRecorder
 LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
-SCAN_INTERVAL_SECONDS = 10
 EXIT_UNEXPECTED_ERROR = 1
 EXIT_CONFIGURATION_ERROR = 2
 EXIT_DINGTALK_STARTUP_ERROR = 3
@@ -41,7 +40,11 @@ def run_monitor(
 ) -> None:
     scan_count = 0
     while True:
-        LOGGER.info("开始扫描群聊直播，优先级=%s", list(config.target_groups))
+        LOGGER.info(
+            "开始扫描群聊直播，优先级=%s, interval=%ss",
+            list(config.target_groups),
+            config.scan_interval_seconds,
+        )
         live_window = session.scan(config.target_groups)
         scan_count += 1
         if live_window is not None:
@@ -57,7 +60,7 @@ def run_monitor(
             LOGGER.info("录制结束，恢复定时扫描: group=%s", live_window.group_name)
         if max_scans is not None and scan_count >= max_scans:
             return
-        sleep(SCAN_INTERVAL_SECONDS)
+        sleep(config.scan_interval_seconds)
 
 
 def run_application(
@@ -80,15 +83,16 @@ def run_application(
         return EXIT_CONFIGURATION_ERROR
 
     LOGGER.info(
-        "服务启动: output_dir=%s, log_dir=%s, log_retention_days=%s",
+        "服务启动: output_dir=%s, log_dir=%s, log_retention_days=%s, scan_interval_seconds=%s",
         config.output_dir,
         config.log_dir,
         config.log_retention_days,
+        config.scan_interval_seconds,
     )
     session = None
     try:
         session = session_factory()
-        recorder = recorder_factory(config.output_dir)
+        recorder = recorder_factory(config.output_dir, config.video_encoder)
         run_monitor(config, session, recorder)
     except DingTalkStartupError:
         LOGGER.exception("启动钉钉失败")

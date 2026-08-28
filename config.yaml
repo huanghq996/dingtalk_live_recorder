@@ -7,6 +7,13 @@ target_groups:
   - Lcai学员群14
   - 公司群
 
+# 每轮扫描完成后的等待时间，单位为秒。
+scan_interval_seconds: 15
+
+# 视频编码器：auto 优先使用 NVIDIA GPU（NVENC），不可用时回退到 CPU；也可设为 libx264 或 h264_nvenc。
+recording:
+  video_encoder: auto
+
 log:
   # 留空时使用 logs。
   directory: logs
