@@ -40,10 +40,19 @@ SHADOW_WINDOW_CLASSES = {"DuiShadowWnd"}
 ANCHOR_TEXTS = {"消息", "未读"}
 LIVE_BANNER_TEXT = "正在直播"
 LIVE_WINDOW_CLASS = "StandardFrame"
+LIVE_SUMMARY_WINDOW_TITLES = {"统计"}
+WM_CLOSE = 0x0010
 
 USER32 = ctypes.windll.user32
 USER32.IsWindowVisible.argtypes = [ctypes.c_void_p]
 USER32.IsWindowVisible.restype = ctypes.c_bool
+USER32.PostMessageW.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_uint,
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+]
+USER32.PostMessageW.restype = ctypes.c_bool
 
 
 class DingTalkStartupError(RuntimeError):
@@ -111,6 +120,8 @@ def find_dingtalk_window():
             continue
         if window.class_name in SHADOW_WINDOW_CLASSES or not window.window_name.strip():
             continue
+        if window.window_name.strip() in LIVE_SUMMARY_WINDOW_TITLES:
+            continue
         is_main_window = (
             window.class_name == "Qt51511QWindowIcon"
             and window.window_name.strip() == "钉钉"
@@ -119,8 +130,37 @@ def find_dingtalk_window():
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[0])
+
     _, window, process_path = candidates[0]
     return window, process_path
+
+
+def close_live_summary_windows() -> int:
+    try:
+        windows = Toolkit.find_desktop_windows()
+    except Exception:
+        LOGGER.exception("查找直播结束统计窗口失败")
+        return 0
+
+    closed_count = 0
+    for window in windows:
+        title = window.window_name.strip()
+        if title not in LIVE_SUMMARY_WINDOW_TITLES:
+            continue
+        if hasattr(window.hwnd, "value"):
+            hwnd = window.hwnd.value
+        else:
+            hwnd = int(window.hwnd)
+        if not USER32.IsWindowVisible(hwnd):
+            continue
+        if not DINGTALK_PROCESS.search(_window_process_path(hwnd)):
+            continue
+        if USER32.PostMessageW(hwnd, WM_CLOSE, 0, 0):
+            closed_count += 1
+            LOGGER.info("已关闭直播结束统计窗口: hwnd=%s, title=%r", hwnd, title)
+        else:
+            LOGGER.warning("关闭直播结束统计窗口失败: hwnd=%s, title=%r", hwnd, title)
+    return closed_count
 
 
 def find_dingtalk_executable() -> Path | None:
@@ -384,6 +424,7 @@ class DingTalkSession:
         try:
             Toolkit.init_option(ASSET_ROOT)
             window, process_path = ensure_dingtalk_window()
+            close_live_summary_windows()
             LOGGER.info(
                 "使用钉钉窗口: hwnd=%s, class=%r, title=%r, process=%r",
                 window.hwnd,

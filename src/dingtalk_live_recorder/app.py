@@ -11,6 +11,7 @@ from .dingtalk import (
     AllGroupsUnrecognizedError,
     DingTalkSession,
     DingTalkStartupError,
+    close_live_summary_windows,
 )
 from .logging_setup import (
     RuntimeDirectoryError,
@@ -36,6 +37,7 @@ def run_monitor(
     *,
     sleep: Callable[[float], None] = time.sleep,
     max_scans: int | None = None,
+    close_summary: Callable[[], int | None] = close_live_summary_windows,
 ) -> None:
     scan_count = 0
     while True:
@@ -48,7 +50,10 @@ def run_monitor(
                 live_window.group_name,
                 live_window.hwnd,
             )
-            recorder.record(live_window.hwnd, live_window.group_name)
+            try:
+                recorder.record(live_window.hwnd, live_window.group_name)
+            finally:
+                close_summary()
             LOGGER.info("录制结束，恢复定时扫描: group=%s", live_window.group_name)
         if max_scans is not None and scan_count >= max_scans:
             return

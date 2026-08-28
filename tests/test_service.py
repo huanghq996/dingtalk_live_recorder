@@ -18,6 +18,7 @@ from dingtalk_live_recorder.dingtalk import (
     DingTalkStartupError,
     GroupInspection,
     LiveWindow,
+    close_live_summary_windows,
     select_prioritized_live,
 )
 from dingtalk_live_recorder.logging_setup import (
@@ -96,10 +97,49 @@ def test_recording_blocks_later_scans() -> None:
     config = AppConfig(Path("recordings"), ("第一群",), Path("logs"), 7)
     sleeps: list[float] = []
 
-    run_monitor(config, Session(), Recorder(), sleep=sleeps.append, max_scans=2)
+    run_monitor(
+        config,
+        Session(),
+        Recorder(),
+        sleep=sleeps.append,
+        max_scans=2,
+        close_summary=lambda: events.append("close-summary"),
+    )
 
-    assert events == ["scan", "record:第一群:7", "scan"]
+    assert events == ["scan", "record:第一群:7", "close-summary", "scan"]
     assert sleeps == [10]
+
+
+def test_closes_only_visible_dingtalk_summary_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dingtalk_live_recorder.dingtalk as dingtalk_module
+
+    class User32:
+        def __init__(self) -> None:
+            self.closed: list[int] = []
+
+        def IsWindowVisible(self, hwnd: int) -> bool:
+            return hwnd != 3
+
+        def PostMessageW(self, hwnd: int, message: int, wparam: int, lparam: int) -> bool:
+            assert message == 0x0010
+            self.closed.append(hwnd)
+            return True
+
+    class Window:
+        def __init__(self, hwnd: int, title: str) -> None:
+            self.hwnd = hwnd
+            self.window_name = title
+            self.class_name = "StandardFrame"
+
+    user32 = User32()
+    windows = [Window(1, "统计"), Window(2, "钉钉"), Window(3, "统计"), Window(4, "统计")]
+    paths = {1: r"C:\DingTalk\DingTalk.exe", 3: r"C:\DingTalk\DingTalk.exe", 4: r"C:\Other\Other.exe"}
+    monkeypatch.setattr(dingtalk_module, "USER32", user32)
+    monkeypatch.setattr(dingtalk_module.Toolkit, "find_desktop_windows", lambda: windows)
+    monkeypatch.setattr(dingtalk_module, "_window_process_path", paths.__getitem__)
+
+    assert close_live_summary_windows() == 1
+    assert user32.closed == [1]
 
 
 def test_runtime_directories_are_created_and_old_logs_removed(tmp_path: Path) -> None:
