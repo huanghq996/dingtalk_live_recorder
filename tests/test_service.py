@@ -159,6 +159,38 @@ def test_recording_blocks_later_scans() -> None:
     assert sleeps == [10]
 
 
+def test_monitor_retries_after_live_window_timeout() -> None:
+    scans = 0
+    sleeps: list[float] = []
+
+    class Session:
+        def scan(self, groups):
+            nonlocal scans
+            scans += 1
+            if scans == 1:
+                raise TimeoutError("10 秒内未确认进入直播界面")
+            return None
+
+    config = AppConfig(
+        Path("recordings"),
+        ("第一群",),
+        Path("logs"),
+        7,
+        scan_interval_seconds=7,
+    )
+
+    run_monitor(
+        config,
+        Session(),
+        object(),
+        sleep=sleeps.append,
+        max_scans=2,
+    )
+
+    assert scans == 2
+    assert sleeps == [7]
+
+
 def test_closes_only_visible_dingtalk_summary_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     import dingtalk_live_recorder.dingtalk as dingtalk_module
 

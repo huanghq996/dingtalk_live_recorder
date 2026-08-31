@@ -45,8 +45,15 @@ def run_monitor(
             list(config.target_groups),
             config.scan_interval_seconds,
         )
-        live_window = session.scan(config.target_groups)
         scan_count += 1
+        try:
+            live_window = session.scan(config.target_groups)
+        except TimeoutError as error:
+            LOGGER.warning(
+                "进入直播窗口超时，本轮扫描结束并将在下个周期重试: %s",
+                error,
+            )
+            live_window = None
         if live_window is not None:
             LOGGER.info(
                 "暂停定时扫描并开始录制: group=%s, hwnd=%s",
