@@ -42,6 +42,8 @@ LIVE_BANNER_TEXT = "正在直播"
 LIVE_WINDOW_CLASS = "StandardFrame"
 LIVE_SUMMARY_WINDOW_TITLES = {"统计"}
 WM_CLOSE = 0x0010
+LIVE_SUMMARY_CLOSE_TIMEOUT_SECONDS = 5.0
+LIVE_SUMMARY_POLL_INTERVAL_SECONDS = 0.2
 
 USER32 = ctypes.windll.user32
 USER32.IsWindowVisible.argtypes = [ctypes.c_void_p]
@@ -135,22 +137,19 @@ def find_dingtalk_window():
     return window, process_path
 
 
-def close_live_summary_windows() -> int:
+def _close_visible_live_summary_windows() -> int | None:
     try:
         windows = Toolkit.find_desktop_windows()
     except Exception:
         LOGGER.exception("查找直播结束统计窗口失败")
-        return 0
+        return None
 
     closed_count = 0
     for window in windows:
         title = window.window_name.strip()
         if title not in LIVE_SUMMARY_WINDOW_TITLES:
             continue
-        if hasattr(window.hwnd, "value"):
-            hwnd = window.hwnd.value
-        else:
-            hwnd = int(window.hwnd)
+        hwnd = window.hwnd.value if hasattr(window.hwnd, "value") else int(window.hwnd)
         if not USER32.IsWindowVisible(hwnd):
             continue
         if not DINGTALK_PROCESS.search(_window_process_path(hwnd)):
@@ -161,6 +160,28 @@ def close_live_summary_windows() -> int:
         else:
             LOGGER.warning("关闭直播结束统计窗口失败: hwnd=%s, title=%r", hwnd, title)
     return closed_count
+
+
+def close_live_summary_windows(
+    timeout: float = LIVE_SUMMARY_CLOSE_TIMEOUT_SECONDS,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> int:
+    deadline = monotonic() + timeout
+    while True:
+        closed_count = _close_visible_live_summary_windows()
+        if closed_count is None:
+            return 0
+        if closed_count > 0:
+            return closed_count
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            if timeout > 0:
+                LOGGER.warning("%.1f 秒内未找到直播结束统计窗口", timeout)
+            return 0
+        sleep(min(LIVE_SUMMARY_POLL_INTERVAL_SECONDS, remaining))
+
 
 
 def find_dingtalk_executable() -> Path | None:
@@ -424,7 +445,7 @@ class DingTalkSession:
         try:
             Toolkit.init_option(ASSET_ROOT)
             window, process_path = ensure_dingtalk_window()
-            close_live_summary_windows()
+            close_live_summary_windows(timeout=0.0)
             LOGGER.info(
                 "使用钉钉窗口: hwnd=%s, class=%r, title=%r, process=%r",
                 window.hwnd,

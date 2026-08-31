@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -221,6 +222,28 @@ def test_closes_only_visible_dingtalk_summary_windows(monkeypatch: pytest.Monkey
 
     assert close_live_summary_windows() == 1
     assert user32.closed == [1]
+
+
+def test_waits_for_delayed_live_summary_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dingtalk_live_recorder.dingtalk as dingtalk_module
+
+    windows = iter([[], [SimpleNamespace(hwnd=7, window_name="统计")]])
+    closed: list[int] = []
+    clock = [0.0]
+    user32 = SimpleNamespace(
+        IsWindowVisible=lambda _: True,
+        PostMessageW=lambda hwnd, *_: closed.append(hwnd) or True,
+    )
+    monkeypatch.setattr(dingtalk_module, "USER32", user32)
+    monkeypatch.setattr(dingtalk_module.Toolkit, "find_desktop_windows", lambda: next(windows))
+    monkeypatch.setattr(dingtalk_module, "_window_process_path", lambda _: r"C:\DingTalk.exe")
+
+    assert close_live_summary_windows(
+        timeout=1.0,
+        sleep=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+        monotonic=lambda: clock[0],
+    ) == 1
+    assert closed == [7]
 
 
 def test_runtime_directories_are_created_and_old_logs_removed(tmp_path: Path) -> None:
