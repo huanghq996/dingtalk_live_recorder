@@ -9,6 +9,7 @@ from pathlib import Path
 from .config import AppConfig, ConfigError, load_config
 from .dingtalk import (
     AllGroupsUnrecognizedError,
+    ConversationListNotFoundError,
     DingTalkSession,
     DingTalkStartupError,
     close_live_summary_windows,
@@ -48,6 +49,12 @@ def run_monitor(
         scan_count += 1
         try:
             live_window = session.scan(config.target_groups)
+        except ConversationListNotFoundError as error:
+            LOGGER.warning(
+                "未定位钉钉会话列表，本轮扫描结束并将在下个周期重试: %s",
+                error,
+            )
+            live_window = None
         except TimeoutError as error:
             LOGGER.warning(
                 "进入直播窗口超时，本轮扫描结束并将在下个周期重试: %s",

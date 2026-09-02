@@ -16,10 +16,12 @@ from dingtalk_live_recorder.app import (
 from dingtalk_live_recorder.config import AppConfig, ConfigError, load_config
 from dingtalk_live_recorder.dingtalk import (
     AllGroupsUnrecognizedError,
+    ConversationListNotFoundError,
     DingTalkStartupError,
     GroupInspection,
     LiveWindow,
     close_live_summary_windows,
+    find_anchor_pair,
     select_prioritized_live,
 )
 from dingtalk_live_recorder.logging_setup import (
@@ -129,6 +131,19 @@ def test_selects_first_live_group_by_configured_priority() -> None:
     assert inspected == ["第一群", "第二群"]
 
 
+def test_anchor_pair_accepts_unread_count_in_ocr_text() -> None:
+    message = SimpleNamespace(text="消息1", box=(217, 62, 50, 21))
+    unread = SimpleNamespace(text="未读1", box=(282, 63, 44, 18))
+    recognition = SimpleNamespace(
+        all_results=[
+            SimpleNamespace(text="消息", box=(39, 152, 40, 18)),
+            message,
+            unread,
+        ]
+    )
+
+    assert find_anchor_pair(recognition) == (message, unread)
+
 def test_recording_blocks_later_scans() -> None:
     events: list[str] = []
 
@@ -157,7 +172,7 @@ def test_recording_blocks_later_scans() -> None:
     )
 
     assert events == ["scan", "record:第一群:7", "close-summary", "scan"]
-    assert sleeps == [10]
+    assert sleeps == [15]
 
 
 def test_monitor_retries_after_live_window_timeout() -> None:
@@ -170,6 +185,38 @@ def test_monitor_retries_after_live_window_timeout() -> None:
             scans += 1
             if scans == 1:
                 raise TimeoutError("10 秒内未确认进入直播界面")
+            return None
+
+    config = AppConfig(
+        Path("recordings"),
+        ("第一群",),
+        Path("logs"),
+        7,
+        scan_interval_seconds=7,
+    )
+
+    run_monitor(
+        config,
+        Session(),
+        object(),
+        sleep=sleeps.append,
+        max_scans=2,
+    )
+
+    assert scans == 2
+    assert sleeps == [7]
+
+
+def test_monitor_retries_after_conversation_list_is_unavailable() -> None:
+    scans = 0
+    sleeps: list[float] = []
+
+    class Session:
+        def scan(self, groups):
+            nonlocal scans
+            scans += 1
+            if scans == 1:
+                raise ConversationListNotFoundError("未识别到同一行的“消息/未读”按钮")
             return None
 
     config = AppConfig(

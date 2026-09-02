@@ -37,7 +37,7 @@ DINGTALK_INSTALL_ROOTS = tuple(
 DINGTALK_PROCESS = re.compile(r"dingtalk\.exe$", re.IGNORECASE)
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SHADOW_WINDOW_CLASSES = {"DuiShadowWnd"}
-ANCHOR_TEXTS = {"消息", "未读"}
+ANCHOR_TEXT_PATTERN = re.compile(r"(?P<label>消息|未读)\d*")
 LIVE_BANNER_TEXT = "正在直播"
 LIVE_WINDOW_CLASS = "StandardFrame"
 LIVE_SUMMARY_WINDOW_TITLES = {"统计"}
@@ -62,6 +62,10 @@ class DingTalkStartupError(RuntimeError):
 
 
 class AllGroupsUnrecognizedError(RuntimeError):
+    pass
+
+
+class ConversationListNotFoundError(RuntimeError):
     pass
 
 
@@ -258,13 +262,13 @@ def recognize_ocr(
 
 
 def find_anchor_pair(recognition) -> tuple[Any, Any]:
-    results = [
-        result
-        for result in recognition.all_results
-        if normalize_text(result.text) in ANCHOR_TEXTS
-    ]
-    messages = [result for result in results if normalize_text(result.text) == "消息"]
-    unread = [result for result in results if normalize_text(result.text) == "未读"]
+    results = []
+    for result in recognition.all_results:
+        match = ANCHOR_TEXT_PATTERN.fullmatch(normalize_text(result.text))
+        if match is not None:
+            results.append((match.group("label"), result))
+    messages = [result for label, result in results if label == "消息"]
+    unread = [result for label, result in results if label == "未读"]
     candidates = []
     for message in messages:
         message_x, message_y, message_width, message_height = box_tuple(message)
@@ -283,7 +287,9 @@ def find_anchor_pair(recognition) -> tuple[Any, Any]:
         found = ", ".join(
             f"{result.text!r}@{tuple(result.box)}" for result in recognition.all_results
         )
-        raise RuntimeError(f"未识别到同一行的“消息/未读”按钮；OCR 结果: {found}")
+        raise ConversationListNotFoundError(
+            f"未识别到同一行的“消息/未读”按钮；OCR 结果: {found}"
+        )
     _, _, message, unread_button = min(candidates, key=lambda item: item[:2])
     return message, unread_button
 
